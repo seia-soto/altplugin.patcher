@@ -1,0 +1,134 @@
+#!/bin/zsh
+set -eu
+
+PLIST_URL=https://github.com/rileytestut/AltStore/raw/develop/AltPlugin/Info.plist
+ARCHIVE_URL=https://github.com/rileytestut/AltStore/raw/develop/AltServer/AltPlugin.zip
+BUNDLE_URL=/Library/Mail/Bundles/AltPlugin.mailbundle
+BUNDLE_PLIST_URL="${BUNDLE_URL}/Contents/Info.plist"
+
+TMP=$(mktemp -d)
+TMP_PLIST="${TMP}/Info.plist"
+TMP_ARCHIVE="${TMP}/AltPlugin.zip"
+
+function help() {
+  cat << EOF
+altplugin.patcher by HoJeong Go (GitHub @seia-soto)
+
+A shell script to patch AltPlugin (mail plug-in) Info.plist file to make plug-in compatible with macOS Monterey
+
+Usage:
+  ./altplugin.patcher [options]
+
+  [-h]    Print help message and exit
+  [-p]    Replace Mail Plug-In's Info.plist only from GitHub
+  [-f]    Fully replace Mail Plug-In bundle from GitHub
+  [-s]    Code sign Mail Plug-in only
+
+Warnings:
+  - The AltPlugin or AltStore is the software that made by @rileytestut and I didn't associated with them.
+  - This script won't download or patch AltStore beta.
+  - This script requires root permision.
+  - Restart Mail application and enable AltPlugin again to take effect.
+
+To uninstall/recover:
+  - Reinstalling Mail Plugin-In from AltServer application is enough.
+
+EOF
+}
+
+function check_os() {
+  if [[ $(uname) != "Darwin" ]]; then
+    echo " ! This script is not supported on systems that not running macOS!"
+
+    exit 1
+  fi
+
+  if [[ $(sw_vers -productVersion) != "12.0" ]]; then
+    echo " ! This script is only supported on systems that running macOS Monterey!"
+
+    exit 1
+  fi
+}
+
+function check_deps() {
+  echo " - Checking if all dependencies are available"
+
+  if ! command -v curl &> /dev/null; then
+    echo " - curl is not available!"
+    exit 1
+  fi
+  if ! command -v unzip &> /dev/null; then
+    echo " - unzip is not available!"
+    exit 1
+  fi
+
+  echo " * All dependencies available!"
+}
+
+function sign_bundle() {
+  echo " - Signing bundle"
+
+  sudo codesign --deep --force --sign - $BUNDLE_URL
+}
+
+function replace_plist() {
+  echo " - Downloading plist file"
+
+  curl -L -o $TMP_PLIST $PLIST_URL
+
+  echo " - Replacing plist file"
+
+  sudo mv $TMP_PLIST $BUNDLE_PLIST_URL
+
+  sign_bundle
+
+  echo " * Replaced plist!"
+}
+
+function replace_archive() {
+  echo " - Downloading archive file"
+
+  curl -L -o $TMP_ARCHIVE $ARCHIVE_URL
+
+  echo " - Uninstalling original AltPlugin (reinstall via AltServer)"
+
+  sudo rm -rf $BUNDLE_URL
+
+  echo " - Installing new AltPlugin from GitHub"
+
+  sudo mkdir $BUNDLE_URL
+  sudo unzip $TMP_ARCHIVE -d "$BUNDLE_URL/.."
+
+  sign_bundle
+
+  echo " * Replaced plug-in!"
+}
+
+function clean_up() {
+  echo " - Cleaning up temporal directory"
+
+  sudo rm -rf $TMP
+}
+
+help
+
+check_os
+check_deps
+
+osascript -e 'quit app "Mail"'
+
+while getopts "hpfs" opt; do
+  case $opt in
+    h) exit 0;;
+    p) echo " * Replacing Info.plist from bundle"; replace_plist;;
+    f) echo " * Fully replacing the bundle"; replace_archive;;
+    s) echo " * Code sigining the bundle only"; sign_bundle;;
+    *) echo " ! Unknown option $opt"; exit 1;;
+  esac
+done
+
+clean_up
+
+open -a "Mail"
+
+echo " * Done!"
